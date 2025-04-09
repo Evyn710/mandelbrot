@@ -1,5 +1,8 @@
+use iced::event::{self, Event};
 use iced::widget::canvas;
-use iced::{mouse, Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
+use iced::{
+    mouse, window, Color, Element, Fill, Point, Rectangle, Renderer, Size, Subscription, Theme,
+};
 
 use num::complex::Complex;
 
@@ -16,32 +19,84 @@ struct Pixel {
 
 #[derive(Debug)]
 enum Message {
-    NoOp,
+    EventOccurred(Event),
 }
 
-#[derive(Default)]
-struct Mandelbrot {}
+#[derive(Debug)]
+struct Mandelbrot {
+    zoom_level: f32,
+    current_mouse_location: Point,
+    center_location: Point,
+    window_size: Size,
+}
+
+impl Default for Mandelbrot {
+    fn default() -> Self {
+        Mandelbrot {
+            zoom_level: 1.0,
+            current_mouse_location: Point::new(-0.5, 0.0),
+            center_location: Point::new(-0.5, 0.0),
+            window_size: Size::new(1200.0, 720.0),
+        }
+    }
+}
 
 impl Mandelbrot {
     fn view(&self) -> Element<Message> {
-        println!("Hello");
+        println!("{:#?}", self.center_location);
         canvas(MandelbrotDrawing {
             threadpool: ThreadPool::new(12),
+            scale: self.zoom_level,
+            center: self.center_location,
         })
         .width(Fill)
         .height(Fill)
         .into()
     }
 
-    fn update(&mut self, message: Message) {}
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::EventOccurred(event) => {
+                if let Event::Window(window::Event::Resized(size)) = event {
+                    self.window_size = size;
+                }
+                if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
+                    match delta {
+                        mouse::ScrollDelta::Lines { x: _, y } => {
+                            self.zoom_level = f32::max(1.0, self.zoom_level + y * 0.1);
+                            self.center_location = Point {
+                                x: self.current_mouse_location.x / self.window_size.width - 0.5,
+                                y: -(self.current_mouse_location.y / self.window_size.height - 0.5),
+                            };
+                        }
+                        mouse::ScrollDelta::Pixels { x: _, y: _ } => {}
+                    }
+                }
+                if let Event::Mouse(mouse::Event::CursorMoved { position }) = event {
+                    self.current_mouse_location = position;
+                }
+            }
+        }
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        event::listen().map(Message::EventOccurred)
+    }
 }
 
 #[derive(Default)]
 struct MandelbrotDrawing {
     threadpool: ThreadPool,
+    scale: f32,
+    center: Point,
 }
 
-fn threaded_fractal_calc(pool: &ThreadPool, bounds: Rectangle) -> Vec<Pixel> {
+fn threaded_fractal_calc(
+    pool: &ThreadPool,
+    bounds: Rectangle,
+    scale: f32,
+    center: Point,
+) -> Vec<Pixel> {
     let mut overall_result: Vec<Pixel> = Vec::new();
 
     let n_threads = pool.max_count();
@@ -52,14 +107,14 @@ fn threaded_fractal_calc(pool: &ThreadPool, bounds: Rectangle) -> Vec<Pixel> {
     let (tx, rx) = channel();
     for i in 0..n_jobs {
         let tx = tx.clone();
-        let start_column = i * pixel_thread_width as usize;
-        let end_column = start_column + pixel_thread_width as usize;
+        let start_row = i * pixel_thread_width as usize;
+        let end_row = start_row + pixel_thread_width as usize;
         pool.execute(move || {
             let mut result: Vec<Pixel> = Vec::new();
-            for x in start_column..end_column {
-                for y in 0..bounds.height as usize {
-                    let i = (x as f32 - bounds.width * 2.0 / 3.0) / (bounds.width / 3.0);
-                    let j = (y as f32 - bounds.height / 2.0) / (bounds.width / 3.0);
+            for x in 0..bounds.width as usize {
+                for y in start_row..end_row {
+                    let i = (x as f32 - bounds.width * 2.0 / 3.0) / (bounds.width / 3.0 * scale);
+                    let j = (y as f32 - bounds.height / 2.0) / (bounds.width / 3.0 * scale);
                     let c = Complex::new(i, j);
                     let mut z = Complex::new(0.0, 0.0);
                     let mut diverged = false;
@@ -104,11 +159,10 @@ impl<Message> canvas::Program<Message> for MandelbrotDrawing {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        println!("{:#?}", bounds.size());
         let start = Instant::now();
         let background = canvas::Path::rectangle(Point::new(0.0, 0.0), bounds.size());
         frame.fill(&background, Color::WHITE);
-        let result = threaded_fractal_calc(&self.threadpool, bounds);
+        let result = threaded_fractal_calc(&self.threadpool, bounds, self.scale, self.center);
         for pixel in result {
             let pixel_rectangle =
                 canvas::Path::rectangle(Point::new(pixel.x, pixel.y), Size::new(1.0, 1.0));
@@ -122,5 +176,7 @@ impl<Message> canvas::Program<Message> for MandelbrotDrawing {
 }
 
 fn main() -> iced::Result {
-    iced::run("Mandelbrot", Mandelbrot::update, Mandelbrot::view)
+    iced::application("Mandelbrot", Mandelbrot::update, Mandelbrot::view)
+        .subscription(Mandelbrot::subscription)
+        .run()
 }
