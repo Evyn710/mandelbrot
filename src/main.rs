@@ -66,16 +66,29 @@ impl Mandelbrot {
                     match delta {
                         mouse::ScrollDelta::Lines { x: _, y } => {
                             self.zoom_level = f32::max(1.0, self.zoom_level + y * 0.1);
-                            self.center_location = Point {
-                                x: self.current_mouse_location.x / self.window_size.width - 0.5,
-                                y: -(self.current_mouse_location.y / self.window_size.height - 0.5),
-                            };
                         }
                         mouse::ScrollDelta::Pixels { x: _, y: _ } => {}
                     }
                 }
                 if let Event::Mouse(mouse::Event::CursorMoved { position }) = event {
                     self.current_mouse_location = position;
+                }
+                if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event {
+                    if button == iced::mouse::Button::Left {
+                        self.center_location = Point {
+                            x: self.current_mouse_location.x / self.window_size.width - 1.0, // these
+                                                                                             // do
+                                                                                             // not
+                                                                                             // take
+                                                                                             // int
+                                                                                             // o
+                                                                                             // account
+                                                                                             // zoom/current
+                                                                                             // view
+                                                                                             // window
+                            y: self.current_mouse_location.y / self.window_size.height - 0.5,
+                        };
+                    }
                 }
             }
         }
@@ -112,10 +125,12 @@ fn threaded_fractal_calc(
         let end_row = start_row + pixel_job_width as usize;
         pool.execute(move || {
             let mut result: Vec<Pixel> = Vec::new();
+            let x_res = 3.0 / scale / bounds.width;
+            let y_res = 2.0 / scale / bounds.height;
             for x in 0..bounds.width as usize {
                 for y in start_row..end_row {
-                    let i = (x as f32 - bounds.width * 2.0 / 3.0) / (bounds.width / 3.0 * scale);
-                    let j = (y as f32 - bounds.height / 2.0) / (bounds.width / 3.0 * scale);
+                    let i = center.x - x_res * bounds.width / 2.0 + x as f32 * x_res; 
+                    let j = center.y - y_res * bounds.height / 2.0 + y as f32 * y_res; 
                     let c = Complex::new(i, j);
                     let mut z = Complex::new(0.0, 0.0);
                     let mut diverged = false;
@@ -178,11 +193,7 @@ impl<'a, Message> canvas::Program<Message> for MandelbrotDrawing <'a> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let start = Instant::now();
         let background = canvas::Path::rectangle(Point::new(0.0, 0.0), bounds.size());
-        let color = if self.scale >= 2.0 {
-            Color::BLACK
-        } else {
-            Color::WHITE
-        };
+        let color = Color::WHITE;
         frame.fill(&background, color);
         let result =
             threaded_fractal_calc(self.threadpool, bounds, self.scale, self.center, color);
