@@ -77,15 +77,15 @@ impl Mandelbrot {
                     if button == iced::mouse::Button::Left {
                         self.center_location = Point {
                             x: self.current_mouse_location.x / self.window_size.width - 1.0, // these
-                                                                                             // do
-                                                                                             // not
-                                                                                             // take
-                                                                                             // int
-                                                                                             // o
-                                                                                             // account
-                                                                                             // zoom/current
-                                                                                             // view
-                                                                                             // window
+                            // do
+                            // not
+                            // take
+                            // int
+                            // o
+                            // account
+                            // zoom/current
+                            // view
+                            // window
                             y: self.current_mouse_location.y / self.window_size.height - 0.5,
                         };
                     }
@@ -116,21 +116,21 @@ fn threaded_fractal_calc(
 
     let n_jobs = 32;
 
-    let pixel_job_width = bounds.width / n_jobs as f32;
+    let pixel_job_height = bounds.height / n_jobs as f32;
 
     let (tx, rx) = channel();
     for i in 0..n_jobs {
         let tx = tx.clone();
-        let start_row = i * pixel_job_width as usize;
-        let end_row = start_row + pixel_job_width as usize;
+        let start_row = i * pixel_job_height as usize;
+        let end_row = start_row + pixel_job_height as usize;
         pool.execute(move || {
             let mut result: Vec<Pixel> = Vec::new();
             let x_res = 3.0 / scale / bounds.width;
             let y_res = 2.0 / scale / bounds.height;
             for x in 0..bounds.width as usize {
                 for y in start_row..end_row {
-                    let i = center.x - x_res * bounds.width / 2.0 + x as f32 * x_res; 
-                    let j = center.y - y_res * bounds.height / 2.0 + y as f32 * y_res; 
+                    let i = center.x - x_res * bounds.width / 2.0 + x as f32 * x_res;
+                    let j = center.y - y_res * bounds.height / 2.0 + y as f32 * y_res;
                     let c = Complex::new(i, j);
                     let mut z = Complex::new(0.0, 0.0);
                     let mut diverged = false;
@@ -179,7 +179,7 @@ fn threaded_fractal_calc(
     overall_result
 }
 
-impl<'a, Message> canvas::Program<Message> for MandelbrotDrawing <'a> {
+impl<'a, Message> canvas::Program<Message> for MandelbrotDrawing<'a> {
     type State = ();
 
     fn draw(
@@ -195,8 +195,7 @@ impl<'a, Message> canvas::Program<Message> for MandelbrotDrawing <'a> {
         let background = canvas::Path::rectangle(Point::new(0.0, 0.0), bounds.size());
         let color = Color::WHITE;
         frame.fill(&background, color);
-        let result =
-            threaded_fractal_calc(self.threadpool, bounds, self.scale, self.center, color);
+        let result = threaded_fractal_calc(self.threadpool, bounds, self.scale, self.center, color);
         for pixel in result {
             let pixel_rectangle =
                 canvas::Path::rectangle(Point::new(pixel.x, pixel.y), Size::new(1.0, 1.0));
