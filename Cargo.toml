@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-iced = { version = "0.13.1", features = ["canvas"] }
+bytes = "1.10.1"
+iced = { version = "0.13.1", features = ["image"] }
 num = "0.4.3"
 threadpool = "1.8.1"

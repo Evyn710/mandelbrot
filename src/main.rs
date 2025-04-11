@@ -1,5 +1,7 @@
+use bytes::Bytes;
+
 use iced::event::{self, Event};
-use iced::widget::canvas;
+use iced::widget::image;
 use iced::{
     mouse, window, Color, Element, Fill, Point, Rectangle, Renderer, Size, Subscription, Theme,
 };
@@ -11,9 +13,10 @@ use std::time::Instant;
 
 use threadpool::ThreadPool;
 
+#[derive(Clone, Debug)]
 struct Pixel {
-    x: f32,
-    y: f32,
+    x: usize,
+    y: usize,
     color: Color,
 }
 
@@ -29,6 +32,7 @@ struct Mandelbrot {
     center_location: Point,
     window_size: Size,
     threadpool: ThreadPool,
+    image: image::Handle,
 }
 
 impl Default for Mandelbrot {
@@ -39,33 +43,31 @@ impl Default for Mandelbrot {
             center_location: Point::new(-0.5, 0.0),
             window_size: Size::new(1200.0, 720.0),
             threadpool: ThreadPool::new(8),
+            image: image::Handle::from_rgba(0, 0, Vec::new()),
         }
     }
 }
 
 impl Mandelbrot {
     fn view(&self) -> Element<Message> {
-        println!("{:#?}", self.center_location);
-        canvas(MandelbrotDrawing {
-            threadpool: &self.threadpool,
-            scale: self.zoom_level,
-            center: self.center_location,
-        })
-        .width(Fill)
-        .height(Fill)
-        .into()
+        image(self.image.clone()).width(Fill).height(Fill).into()
     }
 
     fn update(&mut self, message: Message) {
+        let mut should_draw = false;
         match message {
             Message::EventOccurred(event) => {
                 if let Event::Window(window::Event::Resized(size)) = event {
                     self.window_size = size;
+                    println!("x: {} y: {}", size.width as usize, size.height as usize);
+                    should_draw = true;
                 }
                 if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
                     match delta {
                         mouse::ScrollDelta::Lines { x: _, y } => {
-                            self.zoom_level = f32::max(1.0, self.zoom_level + y * 0.1);
+                            self.zoom_level = f32::max(1.0, self.zoom_level + y * 0.5);
+
+                            should_draw = true;
                         }
                         mouse::ScrollDelta::Pixels { x: _, y: _ } => {}
                     }
@@ -76,21 +78,25 @@ impl Mandelbrot {
                 if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event {
                     if button == iced::mouse::Button::Left {
                         self.center_location = Point {
-                            x: self.current_mouse_location.x / self.window_size.width - 1.0, // these
-                            // do
-                            // not
-                            // take
-                            // int
-                            // o
-                            // account
-                            // zoom/current
-                            // view
-                            // window
+                            x: self.current_mouse_location.x / self.window_size.width - 1.0,
                             y: self.current_mouse_location.y / self.window_size.height - 0.5,
                         };
+
+                        should_draw = true;
                     }
                 }
             }
+        }
+
+        if should_draw {
+            let start = Instant::now();
+            self.image = threaded_fractal_calc(
+                &self.threadpool,
+                self.window_size,
+                self.zoom_level,
+                self.center_location,
+            );
+            println!("duration to calculate {:#?}", start.elapsed());
         }
     }
 
@@ -99,20 +105,20 @@ impl Mandelbrot {
     }
 }
 
-struct MandelbrotDrawing<'a> {
-    threadpool: &'a ThreadPool,
-    scale: f32,
-    center: Point,
-}
-
 fn threaded_fractal_calc(
     pool: &ThreadPool,
-    bounds: Rectangle,
+    bounds: Size,
     scale: f32,
     center: Point,
-    color: Color,
-) -> Vec<Pixel> {
-    let mut overall_result: Vec<Pixel> = Vec::new();
+) -> image::Handle {
+    let mut overall_result = Vec::with_capacity(bounds.width as usize);
+    for _ in 0..bounds.width as usize {
+        let mut column = Vec::with_capacity(bounds.height as usize);
+        for _ in 0..bounds.height as usize {
+            column.push(Color::TRANSPARENT);
+        }
+        overall_result.push(column);
+    }
 
     let n_jobs = 32;
 
@@ -142,28 +148,12 @@ fn threaded_fractal_calc(
                         }
                     }
 
-                    match color {
-                        Color::BLACK => {
-                            if diverged {
-                                result.push(Pixel {
-                                    x: x as f32,
-                                    y: y as f32,
-                                    color: Color::WHITE,
-                                });
-                            }
-                        }
-                        Color::WHITE => {
-                            if !diverged {
-                                result.push(Pixel {
-                                    x: x as f32,
-                                    y: y as f32,
-                                    color: Color::BLACK,
-                                });
-                            }
-                        }
-                        Color::TRANSPARENT => {}
-                        iced::Color { .. } => {}
+                    let mut color = Color::BLACK;
+                    if diverged {
+                        color = Color::WHITE;
                     }
+
+                    result.push(Pixel { x, y, color });
                 }
             }
             tx.send(result)
@@ -172,40 +162,36 @@ fn threaded_fractal_calc(
     }
 
     for _ in 0..n_jobs {
-        overall_result.append(&mut rx.recv().unwrap());
-    }
-
-    println!("{}", overall_result.len());
-    overall_result
-}
-
-impl<'a, Message> canvas::Program<Message> for MandelbrotDrawing<'a> {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let start = Instant::now();
-        let background = canvas::Path::rectangle(Point::new(0.0, 0.0), bounds.size());
-        let color = Color::WHITE;
-        frame.fill(&background, color);
-        let result = threaded_fractal_calc(self.threadpool, bounds, self.scale, self.center, color);
-        for pixel in result {
-            let pixel_rectangle =
-                canvas::Path::rectangle(Point::new(pixel.x, pixel.y), Size::new(1.0, 1.0));
-            frame.fill(&pixel_rectangle, pixel.color);
+        let pixels = rx.recv().unwrap();
+        for pixel in pixels {
+            overall_result[pixel.x][pixel.y] = pixel.color;
         }
-        let duration = start.elapsed();
-        println!("{:#?}", duration);
-
-        vec![frame.into_geometry()]
     }
+
+    let mut bytes: Vec<u8> =
+        Vec::with_capacity(bounds.width as usize * bounds.height as usize * 4 as usize);
+    for j in 0..bounds.height as usize {
+        for i in 0..bounds.width as usize {
+            if overall_result[i][j] == Color::BLACK {
+                bytes.push(0);
+                bytes.push(0);
+                bytes.push(0);
+                bytes.push(255);
+            }
+            if overall_result[i][j] == Color::WHITE {
+                bytes.push(255);
+                bytes.push(255);
+                bytes.push(255);
+                bytes.push(255);
+            }
+        }
+    }
+
+    image::Handle::from_rgba(
+        bounds.width as u32,
+        bounds.height as u32,
+        Bytes::from(bytes),
+    )
 }
 
 fn main() -> iced::Result {
