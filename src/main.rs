@@ -1,7 +1,7 @@
 use bytes::Bytes;
 
 use iced::event::{self, Event};
-use iced::widget::image;
+use iced::widget::{canvas, container, image, stack};
 use iced::{
     mouse, window, Color, Element, Fill, Point, Rectangle, Renderer, Size, Subscription, Theme,
 };
@@ -27,9 +27,11 @@ enum Message {
 
 #[derive(Debug)]
 struct Mandelbrot {
-    zoom_level: f32,
     current_mouse_location: Point,
-    center_location: Point,
+    draw_bounding_box: bool,
+    start_location: Point,
+    end_location: Point,
+    region: Rectangle,
     window_size: Size,
     threadpool: ThreadPool,
     image: image::Handle,
@@ -38,9 +40,11 @@ struct Mandelbrot {
 impl Default for Mandelbrot {
     fn default() -> Self {
         Mandelbrot {
-            zoom_level: 1.0,
             current_mouse_location: Point::new(-0.5, 0.0),
-            center_location: Point::new(-0.5, 0.0),
+            draw_bounding_box: false,
+            start_location: Point::default(),
+            end_location: Point::default(),
+            region: Rectangle::default(),
             window_size: Size::new(1200.0, 720.0),
             threadpool: ThreadPool::new(8),
             image: image::Handle::from_rgba(0, 0, Vec::new()),
@@ -50,7 +54,23 @@ impl Default for Mandelbrot {
 
 impl Mandelbrot {
     fn view(&self) -> Element<Message> {
-        image(self.image.clone()).width(Fill).height(Fill).into()
+        stack![
+            image(self.image.clone()),
+            container(
+                canvas(RectangleProgram {
+                    region: Rectangle {
+                        x: self.start_location.x,
+                        y: self.start_location.y,
+                        width: self.end_location.x - self.start_location.x,
+                        height: self.end_location.y - self.start_location.y,
+                    },
+                    draw_bounding_box: self.draw_bounding_box
+                })
+                .width(Fill)
+                .height(Fill),
+            ),
+        ]
+        .into()
     }
 
     fn update(&mut self, message: Message) {
@@ -62,27 +82,34 @@ impl Mandelbrot {
                     println!("x: {} y: {}", size.width as usize, size.height as usize);
                     should_draw = true;
                 }
-                if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
-                    match delta {
-                        mouse::ScrollDelta::Lines { x: _, y } => {
-                            self.zoom_level = f32::max(1.0, self.zoom_level + y * 0.5);
-
-                            should_draw = true;
-                        }
-                        mouse::ScrollDelta::Pixels { x: _, y: _ } => {}
-                    }
-                }
                 if let Event::Mouse(mouse::Event::CursorMoved { position }) = event {
                     self.current_mouse_location = position;
+                    self.end_location = position;
                 }
                 if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event {
                     if button == iced::mouse::Button::Left {
-                        self.center_location = Point {
-                            x: self.current_mouse_location.x / self.window_size.width - 1.0,
-                            y: self.current_mouse_location.y / self.window_size.height - 0.5,
+                        self.start_location = Point {
+                            x: self.current_mouse_location.x,
+                            y: self.current_mouse_location.y,
                         };
-
-                        should_draw = true;
+                        self.draw_bounding_box = true;
+                    }
+                    if button == iced::mouse::Button::Right {
+                        self.draw_bounding_box = false;
+                    }
+                }
+                if let Event::Mouse(mouse::Event::ButtonReleased(button)) = event {
+                    if button == iced::mouse::Button::Left {
+                        if self.draw_bounding_box {
+                            self.region = Rectangle {
+                                x: self.start_location.x,
+                                y: self.start_location.y,
+                                width: self.end_location.x - self.start_location.x,
+                                height: self.end_location.y - self.start_location.y,
+                            };
+                            should_draw = true;
+                            self.draw_bounding_box = false;
+                        }
                     }
                 }
             }
@@ -90,12 +117,7 @@ impl Mandelbrot {
 
         if should_draw {
             let start = Instant::now();
-            self.image = threaded_fractal_calc(
-                &self.threadpool,
-                self.window_size,
-                self.zoom_level,
-                self.center_location,
-            );
+            self.image = threaded_fractal_calc(&self.threadpool, self.window_size, self.region);
             println!("duration to calculate {:#?}", start.elapsed());
         }
     }
@@ -105,12 +127,7 @@ impl Mandelbrot {
     }
 }
 
-fn threaded_fractal_calc(
-    pool: &ThreadPool,
-    bounds: Size,
-    scale: f32,
-    center: Point,
-) -> image::Handle {
+fn threaded_fractal_calc(pool: &ThreadPool, bounds: Size, region: Rectangle) -> image::Handle {
     let mut overall_result = Vec::with_capacity(bounds.width as usize);
     for _ in 0..bounds.width as usize {
         let mut column = Vec::with_capacity(bounds.height as usize);
@@ -131,12 +148,12 @@ fn threaded_fractal_calc(
         let end_row = start_row + pixel_job_height as usize;
         pool.execute(move || {
             let mut result: Vec<Pixel> = Vec::new();
-            let x_res = 3.0 / scale / bounds.width;
-            let y_res = 2.0 / scale / bounds.height;
+            let x_res = 3.0 / bounds.width;
+            let y_res = 2.0 / bounds.height;
             for x in 0..bounds.width as usize {
                 for y in start_row..end_row {
-                    let i = center.x - x_res * bounds.width / 2.0 + x as f32 * x_res;
-                    let j = center.y - y_res * bounds.height / 2.0 + y as f32 * y_res;
+                    let i = -0.5 - x_res * bounds.width / 2.0 + x as f32 * x_res;
+                    let j = 0.0 - y_res * bounds.height / 2.0 + y as f32 * y_res;
                     let c = Complex::new(i, j);
                     let mut z = Complex::new(0.0, 0.0);
                     let mut color = Color::BLACK;
@@ -185,4 +202,51 @@ fn main() -> iced::Result {
     iced::application("Mandelbrot", Mandelbrot::update, Mandelbrot::view)
         .subscription(Mandelbrot::subscription)
         .run()
+}
+
+struct RectangleProgram {
+    region: Rectangle,
+    draw_bounding_box: bool,
+}
+
+impl canvas::Program<Message> for RectangleProgram {
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        if self.draw_bounding_box {
+            frame.stroke(
+                &canvas::Path::rectangle(
+                    Point {
+                        x: self.region.x,
+                        y: self.region.y,
+                    },
+                    Size {
+                        width: self.region.width,
+                        height: self.region.height,
+                    },
+                ),
+                canvas::Stroke::default()
+                    .with_color(Color {
+                        r: 1.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0,
+                    })
+                    .with_width(2.0),
+            );
+        }
+        vec![frame.into_geometry()]
+    }
+
+    type State = ();
+}
+
+fn Solid(a: Color) -> canvas::Style {
+    todo!()
 }
