@@ -246,7 +246,3 @@ impl canvas::Program<Message> for RectangleProgram {
 
     type State = ();
 }
-
-fn Solid(a: Color) -> canvas::Style {
-    todo!()
-}
