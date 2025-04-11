@@ -139,18 +139,13 @@ fn threaded_fractal_calc(
                     let j = center.y - y_res * bounds.height / 2.0 + y as f32 * y_res;
                     let c = Complex::new(i, j);
                     let mut z = Complex::new(0.0, 0.0);
-                    let mut diverged = false;
-                    for _ in 0..50 {
+                    let mut color = Color::BLACK;
+                    for n in 0..255 {
                         z = z * z + c;
                         if z.norm() >= 2.0 {
-                            diverged = true;
+                            color = Color::from_rgb8(255 - n, 255 - n, 255 - n);
                             break;
                         }
-                    }
-
-                    let mut color = Color::BLACK;
-                    if diverged {
-                        color = Color::WHITE;
                     }
 
                     result.push(Pixel { x, y, color });
@@ -172,18 +167,10 @@ fn threaded_fractal_calc(
         Vec::with_capacity(bounds.width as usize * bounds.height as usize * 4 as usize);
     for j in 0..bounds.height as usize {
         for i in 0..bounds.width as usize {
-            if overall_result[i][j] == Color::BLACK {
-                bytes.push(0);
-                bytes.push(0);
-                bytes.push(0);
-                bytes.push(255);
-            }
-            if overall_result[i][j] == Color::WHITE {
-                bytes.push(255);
-                bytes.push(255);
-                bytes.push(255);
-                bytes.push(255);
-            }
+            bytes.push((overall_result[i][j].r * 255.0) as u8);
+            bytes.push((overall_result[i][j].g * 255.0) as u8);
+            bytes.push((overall_result[i][j].b * 255.0) as u8);
+            bytes.push(255);
         }
     }
 
