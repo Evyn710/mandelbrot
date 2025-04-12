@@ -44,7 +44,13 @@ impl Default for Mandelbrot {
             draw_bounding_box: false,
             start_location: Point::default(),
             end_location: Point::default(),
-            region: Rectangle::default(),
+            region: Rectangle::new(
+                Point { x: -2.0, y: 1.0 },
+                Size {
+                    width: 3.0,
+                    height: 2.0,
+                },
+            ),
             window_size: Size::new(1200.0, 720.0),
             threadpool: ThreadPool::new(8),
             image: image::Handle::from_rgba(0, 0, Vec::new()),
@@ -101,11 +107,18 @@ impl Mandelbrot {
                 if let Event::Mouse(mouse::Event::ButtonReleased(button)) = event {
                     if button == iced::mouse::Button::Left {
                         if self.draw_bounding_box {
+                            let x_distance_ratio = self.start_location.x / self.window_size.width;
+                            let width_ratio = (self.end_location.x - self.start_location.x)
+                                / self.window_size.width;
+                            let y_distance_ratio = self.start_location.y / self.window_size.height;
+                            let height_ratio = (self.end_location.y - self.start_location.y)
+                                / self.window_size.height;
+
                             self.region = Rectangle {
-                                x: self.start_location.x,
-                                y: self.start_location.y,
-                                width: self.end_location.x - self.start_location.x,
-                                height: self.end_location.y - self.start_location.y,
+                                x: self.region.x + self.region.width * x_distance_ratio,
+                                y: self.region.y - self.region.height * y_distance_ratio,
+                                width: self.region.width * width_ratio,
+                                height: self.region.height * height_ratio,
                             };
                             should_draw = true;
                             self.draw_bounding_box = false;
@@ -140,6 +153,9 @@ fn threaded_fractal_calc(pool: &ThreadPool, bounds: Size, region: Rectangle) -> 
     let n_jobs = 32;
 
     let pixel_job_height = bounds.height / n_jobs as f32;
+    println!("{:#?}", region);
+    let x_res = region.width / bounds.width;
+    let y_res = region.height / bounds.height;
 
     let (tx, rx) = channel();
     for i in 0..n_jobs {
@@ -148,19 +164,17 @@ fn threaded_fractal_calc(pool: &ThreadPool, bounds: Size, region: Rectangle) -> 
         let end_row = start_row + pixel_job_height as usize;
         pool.execute(move || {
             let mut result: Vec<Pixel> = Vec::new();
-            let x_res = 3.0 / bounds.width;
-            let y_res = 2.0 / bounds.height;
             for x in 0..bounds.width as usize {
                 for y in start_row..end_row {
-                    let i = -0.5 - x_res * bounds.width / 2.0 + x as f32 * x_res;
-                    let j = 0.0 - y_res * bounds.height / 2.0 + y as f32 * y_res;
+                    let i = region.x + x_res * x as f32;
+                    let j = region.y - y_res * y as f32;
                     let c = Complex::new(i, j);
                     let mut z = Complex::new(0.0, 0.0);
                     let mut color = Color::BLACK;
-                    for n in 0..255 {
+                    for n in 0..1000 {
                         z = z * z + c;
                         if z.norm() >= 2.0 {
-                            color = Color::from_rgb8(255 - n, 255 - n, 255 - n);
+                            color = Color::WHITE;
                             break;
                         }
                     }
